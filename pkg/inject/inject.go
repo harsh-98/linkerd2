@@ -2,6 +2,7 @@ package inject
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -103,20 +104,6 @@ func NewResourceConfig(configs *config.All) *ResourceConfig {
 	}
 }
 
-// String satisfies the Stringer interface
-func (conf *ResourceConfig) String() string {
-	l := []string{}
-
-	if conf.meta.Kind != "" {
-		l = append(l, conf.meta.Kind)
-	}
-	if conf.workLoadMeta != nil {
-		l = append(l, fmt.Sprintf("%s.%s", conf.workLoadMeta.GetName(), conf.workLoadMeta.GetNamespace()))
-	}
-
-	return strings.Join(l, "/")
-}
-
 // WithKind enriches ResourceConfig with the workload kind
 func (conf *ResourceConfig) WithKind(kind string) *ResourceConfig {
 	conf.meta = metav1.TypeMeta{Kind: kind}
@@ -145,21 +132,26 @@ func (conf *ResourceConfig) YamlMarshalObj() ([]byte, error) {
 
 // ParseMetaAndYaml fills conf fields with both the metatada and the workload contents
 func (conf *ResourceConfig) ParseMetaAndYaml(bytes []byte) (*Report, error) {
-	if _, err := conf.ParseMeta(bytes); err != nil {
+	if _, err := conf.ParseMeta(bytes, ""); err != nil {
 		return nil, err
 	}
 	r := newReport(conf)
-	return &r, conf.parse(bytes)
+	return &r, conf.Parse(bytes)
 }
 
 // ParseMeta extracts metadata from bytes.
-// It returns false if the workload's payload is empty
-func (conf *ResourceConfig) ParseMeta(bytes []byte) (bool, error) {
+// If bytes doesn't contain the namespace (webhook case) then it must be
+// provided in the second argument.
+// It returns false if the workload's payload is empty.
+func (conf *ResourceConfig) ParseMeta(bytes []byte, ns string) (bool, error) {
 	if err := yaml.Unmarshal(bytes, &conf.meta); err != nil {
 		return false, err
 	}
 	if err := yaml.Unmarshal(bytes, &conf.podMeta); err != nil {
 		return false, err
+	}
+	if ns != "" {
+		conf.podMeta.Namespace = ns
 	}
 	return conf.podMeta.ObjectMeta != nil, nil
 }
@@ -172,16 +164,11 @@ func (conf *ResourceConfig) GetPatch(
 	report := newReport(conf)
 	log.Infof("received %s/%s", strings.ToLower(conf.meta.Kind), report.Name)
 
-	if err := conf.parse(bytes); err != nil {
+	if err := conf.Parse(bytes); err != nil {
 		return nil, nil, err
 	}
 
-	var patch *Patch
-	if strings.ToLower(conf.meta.Kind) == k8s.Pod {
-		patch = NewPatchPod()
-	} else {
-		patch = NewPatchDeployment()
-	}
+	patch := NewPatch(conf.meta.Kind)
 
 	// If we don't inject anything into the pod template then output the
 	// original serialization of the original object. Otherwise, output the
@@ -241,7 +228,9 @@ func (conf *ResourceConfig) JSONToYAML(bytes []byte) ([]byte, error) {
 	return yaml.Marshal(obj)
 }
 
-func (conf *ResourceConfig) parse(bytes []byte) error {
+// Parse parses the bytes payload, filling the gaps in ResourceConfig
+// depending on the workload kind
+func (conf *ResourceConfig) Parse(bytes []byte) error {
 	// The Kubernetes API is versioned and each version has an API modeled
 	// with its own distinct Go types. If we tell `yaml.Unmarshal()` which
 	// version we support then it will provide a representation of that
@@ -346,20 +335,28 @@ func (conf *ResourceConfig) parse(bytes []byte) error {
 
 		conf.obj = v
 		conf.podSpec = &v.Spec
+		ns := conf.podMeta.Namespace
 		conf.podMeta = objMeta{&v.ObjectMeta}
+		if ns != "" {
+			conf.podMeta.Namespace = ns
+		}
 	}
 
 	return nil
 }
 
-// GetOwnerReferences returns the list of the current workload parents
-func (conf *ResourceConfig) GetOwnerReferences() []metav1.OwnerReference {
-	return conf.podMeta.OwnerReferences
-}
-
 func (conf *ResourceConfig) complete(template *v1.PodTemplateSpec) {
 	conf.podSpec = &template.Spec
 	conf.podMeta = objMeta{&template.ObjectMeta}
+}
+
+// GetPod returns the parsed object as a *v1.Pod variable
+func (conf *ResourceConfig) GetPod() (*v1.Pod, error) {
+	pod, ok := conf.obj.(*v1.Pod)
+	if !ok {
+		return nil, errors.New("the webhook payload doesn't correspond to a pod")
+	}
+	return pod, nil
 }
 
 // injectPodSpec adds linkerd sidecars to the provided PodSpec.
@@ -586,15 +583,11 @@ func (conf *ResourceConfig) injectObjectMeta(patch *Patch) {
 		patch.addPodAnnotation(k8s.IdentityModeAnnotation, k8s.IdentityModeDisabled)
 	}
 
+	if len(conf.podMeta.Labels) == 0 {
+		patch.addPodLabelsRoot()
+	}
 	for k, v := range conf.podLabels {
 		patch.AddPodLabel(k, v)
-	}
-}
-
-// AddRootLabels adds all the pod labels into the root workload (e.g. Deployment)
-func (conf *ResourceConfig) AddRootLabels(patch *Patch) {
-	for k, v := range conf.podLabels {
-		patch.addRootLabel(k, v)
 	}
 }
 
