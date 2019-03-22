@@ -552,12 +552,12 @@ func (conf *ResourceConfig) injectObjectMeta(patch *Patch) {
 	if len(conf.podMeta.Annotations) == 0 {
 		patch.addPodAnnotationsRoot()
 	}
-	patch.addPodAnnotation(k8s.ProxyVersionAnnotation, conf.configs.GetGlobal().GetVersion())
+	patch.AddPodAnnotation(k8s.ProxyVersionAnnotation, conf.configs.GetGlobal().GetVersion())
 
 	if conf.configs.GetGlobal().GetIdentityContext() != nil {
-		patch.addPodAnnotation(k8s.IdentityModeAnnotation, k8s.IdentityModeDefault)
+		patch.AddPodAnnotation(k8s.IdentityModeAnnotation, k8s.IdentityModeDefault)
 	} else {
-		patch.addPodAnnotation(k8s.IdentityModeAnnotation, k8s.IdentityModeDisabled)
+		patch.AddPodAnnotation(k8s.IdentityModeAnnotation, k8s.IdentityModeDisabled)
 	}
 
 	for k, v := range conf.podLabels {

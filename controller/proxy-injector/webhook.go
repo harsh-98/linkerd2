@@ -129,7 +129,7 @@ func (w *Webhook) inject(request *admissionv1beta1.AdmissionRequest) (*admission
 		return admissionResponse, nil
 	}
 
-	p.AddCreatedByPodAnnotation(fmt.Sprintf("linkerd/proxy-injector %s", version.Version))
+	p.AddPodAnnotation(k8s.CreatedByAnnotation, fmt.Sprintf("linkerd/proxy-injector %s", version.Version))
 
 	// When adding workloads through `kubectl apply` the spec template labels are
 	// automatically copied to the workload's main metadata section.
