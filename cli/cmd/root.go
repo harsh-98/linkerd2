@@ -112,6 +112,7 @@ func init() {
 	RootCmd.AddCommand(newCmdTop())
 	RootCmd.AddCommand(newCmdUninject())
 	RootCmd.AddCommand(newCmdUpgrade())
+	RootCmd.AddCommand(newCmdUpgradeCli())
 	RootCmd.AddCommand(newCmdVersion())
 }
 
